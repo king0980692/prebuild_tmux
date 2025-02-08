@@ -1,0 +1,74 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Build with Docker
+      run: |
+        docker build -t tmux-builder .
+        docker create --name tmux_container tmux-builder
+        docker cp tmux_container:/usr/local/bin/tmux tmux-linux-x64
+        docker rm tmux_container
+
+    - name: Upload Linux artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: tmux-linux-x64
+        path: tmux-linux-x64
+
+  build-macos:
+    runs-on: macos-14
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        brew update
+        brew install libevent ncurses pkg-config
+
+    - name: Build tmux
+      run: |
+        wget https://github.com/tmux/tmux/releases/download/3.5a/tmux-3.5a.tar.gz
+        tar -xzf tmux-3.5a.tar.gz
+        cd tmux-3.5a
+        ./configure --prefix=/usr/local \
+          LDFLAGS="-L/opt/homebrew/opt/libevent/lib -L/opt/homebrew/opt/ncurses/lib" \
+          CPPFLAGS="-I/opt/homebrew/opt/libevent/include -I/opt/homebrew/opt/ncurses/include"
+        make
+        sudo make install
+        cp /usr/local/bin/tmux ../tmux-macos-arm64
+
+    - name: Upload macOS artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: tmux-macos-arm64
+        path: tmux-macos-arm64
+
+  create-release:
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ github.ref_name }}
+        files: |
+          artifacts/tmux-linux-x64
+          artifacts/tmux-macos-arm64
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
